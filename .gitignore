@@ -1,7 +1,1 @@
-./test_img/
-./train_img/
-./test_img
-./train_img
-./test.csv
-./train.csv
-./sample_submission.csv
+/data/
