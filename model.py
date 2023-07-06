@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 # U-Net의 기본 구성 요소인 Double Convolution Block을 정의합니다.
 def double_conv(in_channels, out_channels):
     return nn.Sequential(

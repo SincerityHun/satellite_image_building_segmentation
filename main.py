@@ -1,4 +1,4 @@
-from model import UNet,device
+from model import UNet
 import torch
 from tqdm import tqdm
 from data_loader import dataloader
@@ -7,6 +7,12 @@ from data_loader import transform
 import numpy as np
 from utils import rle_encode,submission
 
+if torch.backends.mps.is_available():
+    device = torch.device('mps')
+    print("MPS Used")
+else:
+    device = torch.device('cpu')
+    print("CPU Used")
 
 if __name__ == "__main__":
     # 1. Train
@@ -36,7 +42,7 @@ if __name__ == "__main__":
         print(f'Epoch {epoch+1}, Loss: {epoch_loss/len(dataloader)}')
 
     # 2. Test
-    test_dataset = SatelliteDataset(csv_file='./test.csv', transform=transform, infer=True)
+    test_dataset = SatelliteDataset(csv_file='./data/test.csv', transform=transform, infer=True)
     test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=4)
 
     # 3. Inference

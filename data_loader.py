@@ -10,5 +10,5 @@ transform = A.Compose(
     ]
 )
 
-dataset = SatelliteDataset(csv_file='./train.csv', transform=transform)
+dataset = SatelliteDataset(csv_file='./data/train.csv', transform=transform)
 dataloader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=4)

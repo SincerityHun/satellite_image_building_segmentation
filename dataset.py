@@ -14,6 +14,7 @@ class SatelliteDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = self.data.iloc[idx, 1]
+        img_path = img_path.replace('./', './data/')  # 경로 변경
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         

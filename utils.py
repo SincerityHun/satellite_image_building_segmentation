@@ -25,6 +25,6 @@ def rle_encode(mask):
 
 # 제출 함수
 def submission(column, result):
-    submit = pd.read_csv(".sample_submission.csv")
+    submit = pd.read_csv("./data/sample_submission.csv")
     submit["mask_rle"] = result
     submit.to_csv("./submit.csv", index=False)
