@@ -1,11 +1,14 @@
 from model import UNet
 import torch
 from tqdm import tqdm
-from data_loader import dataloader
+from data_loader import *
 from dataset import SatelliteDataset,DataLoader
-from data_loader import transform
 import numpy as np
-from utils import rle_encode,submission
+from utils import *
+# 1. Add these at the beginning of the script
+import pandas as pd
+from joblib import Parallel, delayed
+from typing import List
 
 if torch.backends.mps.is_available():
     device = torch.device('mps')
@@ -22,47 +25,77 @@ if __name__ == "__main__":
     # loss function과 optimizer 정의
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    EPOCH = 1
 
     # training loop
-    for epoch in range(10):  # 10 에폭 동안 학습합니다.
+    for epoch in range(EPOCH):  # 10 에폭 동안 학습합니다.
         model.train()
         epoch_loss = 0
-        for images, masks in tqdm(dataloader):
+        epoch_dice = 0
+        for images, masks in tqdm(train_loader):
+            # 1. 이미지, 마스크 설정
             images = images.float().to(device)
             masks = masks.float().to(device)
 
+            # 2. Optimizer 설정
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, masks.unsqueeze(1))
+
+            outputs_np = outputs.detach().cpu().numpy()
+            masks_np = masks.cpu().numpy()
+            loss = criterion(outputs, masks.unsqueeze(1))
+            dice = dice_coef(outputs, masks.unsqueeze(1))
+
+            # 3. backpropagation
             loss.backward()
             optimizer.step()
 
             epoch_loss += loss.item()
+            epoch_dice += dice.item()
 
-        print(f'Epoch {epoch+1}, Loss: {epoch_loss/len(dataloader)}')
+        print(f'Training Epoch {epoch+1}, Loss: {epoch_loss/len(train_loader)}, Dice: {epoch_dice/len(train_loader)}')
 
-    # 2. Test
-    test_dataset = SatelliteDataset(csv_file='./data/test.csv', transform=transform, infer=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=4)
-
-    # 3. Inference
-    with torch.no_grad():
+        # validation
         model.eval()
-        result = []
-        for images in tqdm(test_dataloader):
-            images = images.float().to(device)
-            
-            outputs = model(images)
-            masks = torch.sigmoid(outputs).cpu().numpy()
-            masks = np.squeeze(masks, axis=1)
-            masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
-            
-            for i in range(len(images)):
-                mask_rle = rle_encode(masks[i])
-                if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
-                    result.append(-1)
-                else:
-                    result.append(mask_rle)
+        valid_loss = 0
+        epoch_dice = 0
+        
+        with torch.no_grad():
+            for images, masks in tqdm(valid_loader):
+                images = images.float().to(device)
+                masks = masks.float().to(device)
+
+                outputs = model(images)
+                loss = criterion(outputs, masks.unsqueeze(1))
+                dice = dice_coef(outputs, masks.unsqueeze(1))
+                
+
+                valid_loss += loss.item()
+                epoch_dice += dice.item()
+
+        print(f'Valid Epoch {epoch+1}, Loss: {epoch_loss/len(train_loader)}, Dice: {epoch_dice/len(valid_loader)}')
+
     
-    # 4. Submit
-    submission('mask_rle',result)
+
+    # # 4. Inference
+    # with torch.no_grad():
+    #     model.eval()
+    #     result = []
+    #     for images in tqdm(test_dataloader):
+    #         images = images.float().to(device)
+            
+    #         outputs = model(images)
+    #         masks = torch.sigmoid(outputs).cpu().numpy()
+    #         masks = np.squeeze(masks, axis=1)
+    #         masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
+            
+    #         for i in range(len(images)):
+    #             mask_rle = rle_encode(masks[i])
+    #             if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
+    #                 result.append(-1)
+    #             else:
+    #                 result.append(mask_rle)
+    
+    # # 4. Submit
+    # submission('mask_rle',result)
