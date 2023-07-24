@@ -11,7 +11,7 @@ IMG_WIDTH = 224
 train_transform = A.Compose(
     [
         A.Resize(IMG_HEIGHT, IMG_WIDTH),
-        A.IAASharpen(alpha=(0.3, 0.5), lightness=(0.5, 1.0), always_apply=True),
+        A.Sharpen(alpha=(0.3, 0.5), lightness=(0.5, 1.0), always_apply=True),
         A.OneOf(
             [
                 A.HorizontalFlip(),
@@ -24,7 +24,7 @@ train_transform = A.Compose(
             [
                 A.HueSaturationValue(),
                 A.RandomBrightness(),
-                A.RandomContrast(),
+                A.RandomBrightnessContrast(),
             ],
             p=1,
         ),

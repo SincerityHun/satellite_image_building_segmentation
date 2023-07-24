@@ -1,4 +1,4 @@
-from model import Unet_block, Nested_UNet
+from model import UNet
 import torch
 from tqdm import tqdm
 from data_loader import *
@@ -21,11 +21,11 @@ else:
 if __name__ == "__main__":
     # 1. Train
     # model 초기화
-    model = Nested_UNet(1, 3, deep_supervision=False).to(device)
+    model = UNet(backbone_name='resnet18').to(device)
 
     # loss function과 optimizer 정의
     criterion = torch.nn.BCEWithLogitsLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.000068)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
     EPOCH = 1
     best_dice = 0
 
@@ -37,17 +37,17 @@ if __name__ == "__main__":
         for images, masks in tqdm(train_loader):
             # 1. 이미지, 마스크 설정
             images = images.float().to(device)
-            masks = masks.float().to(device)
+            masks = masks.long().to(device)
+            masks_one_hot = torch.nn.functional.one_hot(masks, num_classes=2).permute(0, 3, 1, 2).float()
 
             # 2. Optimizer 설정
             optimizer.zero_grad()
             outputs = model(images)
-            loss = criterion(outputs, masks.unsqueeze(1))
+            loss = criterion(outputs, masks_one_hot)
 
             outputs_np = outputs.detach().cpu().numpy()
             masks_np = masks.cpu().numpy()
-            loss = criterion(outputs, masks.unsqueeze(1))
-            dice = dice_coef(outputs, masks.unsqueeze(1))
+            dice = dice_coef(outputs, masks_one_hot)
 
             # 3. backpropagation
             loss.backward()
@@ -68,11 +68,12 @@ if __name__ == "__main__":
         with torch.no_grad():
             for images, masks in tqdm(valid_loader):
                 images = images.float().to(device)
-                masks = masks.float().to(device)
+                masks = masks.long().to(device)
+                masks_one_hot = torch.nn.functional.one_hot(masks, num_classes=2).permute(0, 3, 1, 2).float()
 
                 outputs = model(images)
-                loss = criterion(outputs, masks.unsqueeze(1))
-                dice = dice_coef(outputs, masks.unsqueeze(1))
+                loss = criterion(outputs, masks_one_hot)
+                dice = dice_coef(outputs, masks_one_hot)
 
                 valid_loss += loss.item()
                 epoch_dice += dice.item()
@@ -82,26 +83,26 @@ if __name__ == "__main__":
         )
         if best_dice < valid_dice:
             best_dice = valid_dice
-            torch.save(model.state_dict(), f"./results/unet/best_model.pth")
+            torch.save(model.state_dict(), f"./best_model.pth")
 
-    # # 4. Inference
-    # with torch.no_grad():
-    #     model.eval()
-    #     result = []
-    #     for images in tqdm(test_dataloader):
-    #         images = images.float().to(device)
+    # 4. Inference
+    with torch.no_grad():
+        model.eval()
+        result = []
+        for images in tqdm(test_dataloader):
+            images = images.float().to(device)
 
-    #         outputs = model(images)
-    #         masks = torch.sigmoid(outputs).cpu().numpy()
-    #         masks = np.squeeze(masks, axis=1)
-    #         masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
+            outputs = model(images)
+            masks = torch.sigmoid(outputs).cpu().numpy()
+            masks = np.squeeze(masks, axis=1)
+            masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
 
-    #         for i in range(len(images)):
-    #             mask_rle = rle_encode(masks[i])
-    #             if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
-    #                 result.append(-1)
-    #             else:
-    #                 result.append(mask_rle)
+            for i in range(len(images)):
+                mask_rle = rle_encode(masks[i])
+                if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
+                    result.append(-1)
+                else:
+                    result.append(mask_rle)
 
-    # # 4. Submit
-    # submission('mask_rle',result)
+    # 4. Submit
+    submission('mask_rle',result)
