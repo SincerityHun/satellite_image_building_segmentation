@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from typing import List, Union
 from joblib import Parallel, delayed
 
@@ -29,6 +31,22 @@ def dice_coef(preds, true, eps=1e-7):
     intersection = (preds * true).sum()
     dsc = (2. * intersection) / (preds.sum() + true.sum() + eps)
     return dsc
+
+class BCEDiceLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input, target):
+        bce = F.binary_cross_entropy_with_logits(input, target)
+        smooth = 1e-5
+        input = torch.sigmoid(input)
+        num = target.size(0)
+        input = input.view(num, -1)
+        target = target.view(num, -1)
+        intersection = (input * target)
+        dice = (2. * intersection.sum(1) + smooth) / (input.sum(1) + target.sum(1) + smooth)
+        dice = 1 - dice.sum() / num
+        return 0.5 * bce + dice
 
 
 # 제출 함수
