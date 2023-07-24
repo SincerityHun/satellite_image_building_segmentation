@@ -18,6 +18,7 @@ from torch.nn import init
 from tqdm import tqdm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import random
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
@@ -48,17 +49,23 @@ def rle_encode(mask):
 # ## Custom Dataset
 
 class SatelliteDataset(Dataset):
-    def __init__(self, data, transform=None, augmentation=None, infer=False):
-        self.data = data
+    def __init__(self, csv_file, transform=None, augmentation=None, infer=False,indices=None):
+        self.data = pd.read_csv(csv_file)
         self.transform = transform
         self.augmentation = augmentation
         self.infer = infer
+        self.indices = indices if indices is not None else list(range(len(self.data)))
 
     def __len__(self):
-        return len(self.data)
+        if self.infer:
+            return len(self.indices)
+        else:
+            return len(self.indices) * 16  # 16 sub-images for each image
 
     def __getitem__(self, idx):
-        img_path = self.data.iloc[idx, 1]
+        orig_idx = self.indices[idx // (1 if self.infer else 16)]
+        img_path = self.data.iloc[orig_idx, 1]
+        img_path = img_path.replace("./", "./data/")  # 경로 변경
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
@@ -66,9 +73,16 @@ class SatelliteDataset(Dataset):
             if self.transform:
                 image = self.transform(image=image)['image']
             return image
+        # 1. Get the original index and the index of the sub-image
+        sub_idx = idx % 16
+        # 2. Compute the coordinates of the sub-image
+        i = sub_idx // 4
+        j = sub_idx % 4
+        image = image[i * 224 : (i + 1) * 224, j * 224 : (j + 1) * 224, :]
 
-        mask_rle = self.data.iloc[idx, 2]
-        mask = rle_decode(mask_rle, (image.shape[0], image.shape[1]))
+        mask_rle = self.data.iloc[orig_idx, 2]
+        mask = rle_decode(mask_rle, (1024,1024))
+        mask = mask[i * 224 : (i + 1) * 224, j * 224 : (j + 1) * 224]
 
         if self.transform:
             augmented = self.transform(image=image, mask=mask)
@@ -122,14 +136,18 @@ augmentation = A.Compose([
     ToTensorV2()
 ])
 
-train_csv = pd.read_csv('./cropped_train_5by5.csv')
-train_df = train_csv[:int(len(train_csv)*0.95)]
-valid_df = train_csv[int(len(train_csv)*0.95):]
+train_ratio = 0.95
+# Split indices
+indices = list(range(len(pd.read_csv("./data/train.csv"))))
+random.shuffle(indices)
+split_idx = int(len(indices) * train_ratio)
+train_indices = indices[:split_idx]
+valid_indices = indices[split_idx:]
 
-train_dataset = SatelliteDataset(data=train_df, transform=transform, augmentation=None)
+train_dataset = SatelliteDataset(csv_file="./data/train.csv", transform=transform, augmentation=None,indices=train_indices)
 train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
 
-valid_dataset = SatelliteDataset(data=valid_df, transform=transform_valid, augmentation=None)
+valid_dataset = SatelliteDataset(csv_file="./data/train.csv", transform=transform_valid, augmentation=None,indices=valid_indices)
 valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=True, num_workers=4)
 
 ## init weights
@@ -415,104 +433,104 @@ class ResUnetPlusPlus(nn.Module):
 
 
 # ## Model Train
+if __name__=="__main__":
 
-# model 초기화
-model = ResUnetPlusPlus().to(device)
+    # model 초기화
+    model = ResUnetPlusPlus(channel=3).to(device)
 
-best_loss = 10 ** 9
-patience_limit = 4
-patience_check = 0
+    best_loss = 10 ** 9
+    patience_limit = 4
+    patience_check = 0
 
-# loss function과 optimizer 정의
-criterion = torch.nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-f = open("train_log.txt", 'w')
-PATH = './model/'
+    # loss function과 optimizer 정의
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    f = open("train_log.txt", 'w')
+    PATH = './model/'
 
-# training loop
-for epoch in range(50):  # 10 에폭 동안 학습합니다.
-    model.train()
-    epoch_loss = 0
-    for images, masks in tqdm(train_dataloader):
-        images = images.float().to(device)
-        masks = masks.float().to(device)
+    # training loop
+    for epoch in range(50):  # 10 에폭 동안 학습합니다.
+        model.train()
+        epoch_loss = 0
+        for images, masks in tqdm(train_dataloader):
+            images = images.float().to(device)
+            masks = masks.float().to(device)
 
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, masks.unsqueeze(1))
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, masks.unsqueeze(1))
+            loss.backward()
+            optimizer.step()
 
-        epoch_loss += loss.item()
-    
-    ###valid
-    model.eval()
-    val_loss = 0
-    for images, masks in tqdm(valid_dataloader):
-        images = images.float().to(device)
-        masks = masks.float().to(device)
-        outputs = model(images)
+            epoch_loss += loss.item()
         
-        loss = criterion(outputs, masks.unsqueeze(1))
-        val_loss += loss.item()
+        ###valid
+        model.eval()
+        val_loss = 0
+        for images, masks in tqdm(valid_dataloader):
+            images = images.float().to(device)
+            masks = masks.float().to(device)
+            outputs = model(images)
+            
+            loss = criterion(outputs, masks.unsqueeze(1))
+            val_loss += loss.item()
 
-    f = open('train_log.txt', 'a')
-    print(f'Epoch {epoch+1}, Loss: {epoch_loss/len(train_dataloader)}, Valid Loss: {val_loss/len(valid_dataloader)}')
-    log_data = 'Epoch ' + str(epoch+1) + ', Loss:' + str(epoch_loss/len(train_dataloader)) + ', Valid Loss: ' + str(val_loss/len(valid_dataloader)) + '\n'
-    f.write(log_data)
-    f.close()
+        f = open('train_log.txt', 'a')
+        print(f'Epoch {epoch+1}, Loss: {epoch_loss/len(train_dataloader)}, Valid Loss: {val_loss/len(valid_dataloader)}')
+        log_data = 'Epoch ' + str(epoch+1) + ', Loss:' + str(epoch_loss/len(train_dataloader)) + ', Valid Loss: ' + str(val_loss/len(valid_dataloader)) + '\n'
+        f.write(log_data)
+        f.close()
 
-    if (epoch+1)%5 == 0:
-        #epoch_list = str(epoch+1)
-        torch.save(model, PATH + f"./epoch{epoch+1}_model_unet2p_v2.pt")
-        print('Model epoch saved!')
-    
-    ### early stopping
-    if val_loss > best_loss:
-        patience_check += 1
-        if patience_check >= patience_limit:
-            break
-    else:
-        best_loss = val_loss
-        patience_check = 0
-        torch.save(model, PATH + './best_model_unet2p_v2.pt')
-        print('Model saved!')
-
-PATH = './model/'
-torch.save(model.state_dict(), PATH + 'unet2p_v2_latest_epoch.pt')
-
-
-# ## Inference
-
-test_csv = pd.read_csv('./test.csv')
-test_dataset = SatelliteDataset(data=test_csv, transform=transform_valid, augmentation=None, infer=True)
-test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=16)
-
-
-with torch.no_grad():
-    model.eval()
-    result = []
-    for images in tqdm(test_dataloader):
-        images = images.float().to(device)
+        if (epoch+1)%5 == 0:
+            #epoch_list = str(epoch+1)
+            torch.save(model, PATH + f"./epoch{epoch+1}_model_unet2p_v2.pt")
+            print('Model epoch saved!')
         
-        outputs = model(images)
-        masks = torch.sigmoid(outputs).cpu().numpy()
-        masks = np.squeeze(masks, axis=1)
-        masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
-        
-        for i in range(len(images)):
-            mask_rle = rle_encode(masks[i])
-            if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
-                result.append(-1)
-            else:
-                result.append(mask_rle)
-                
-                
+        ### early stopping
+        if val_loss > best_loss:
+            patience_check += 1
+            if patience_check >= patience_limit:
+                break
+        else:
+            best_loss = val_loss
+            patience_check = 0
+            torch.save(model, PATH + './best_model_unet2p_v2.pt')
+            print('Model saved!')
+
+    PATH = './model/'
+    torch.save(model.state_dict(), PATH + 'unet2p_v2_latest_epoch.pt')
 
 
-# ## Submission
+    # ## Inference
 
-submit = pd.read_csv('./sample_submission.csv')
-submit['mask_rle'] = result
+    test_dataset = SatelliteDataset(csv_file="./data/test.csv", transform=transform_valid, augmentation=None, infer=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=16)
 
-submit.to_csv('./submit_cropped_unet2plus_2.csv', index=False)
+
+    with torch.no_grad():
+        model.eval()
+        result = []
+        for images in tqdm(test_dataloader):
+            images = images.float().to(device)
+            
+            outputs = model(images)
+            masks = torch.sigmoid(outputs).cpu().numpy()
+            masks = np.squeeze(masks, axis=1)
+            masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
+            
+            for i in range(len(images)):
+                mask_rle = rle_encode(masks[i])
+                if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
+                    result.append(-1)
+                else:
+                    result.append(mask_rle)
+                    
+                    
+
+
+    # ## Submission
+
+    submit = pd.read_csv('./sample_submission.csv')
+    submit['mask_rle'] = result
+
+    submit.to_csv('./submit_cropped_unet2plus_2.csv', index=False)
