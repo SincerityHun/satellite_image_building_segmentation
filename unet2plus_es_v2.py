@@ -19,12 +19,13 @@ from tqdm import tqdm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
-    print('using gpu')
+    print("using gpu")
 
 
 # ## Utils
+
 
 # RLE 디코딩 함수
 def rle_decode(mask_rle, shape):
@@ -32,10 +33,11 @@ def rle_decode(mask_rle, shape):
     starts, lengths = [np.asarray(x, dtype=int) for x in (s[0:][::2], s[1:][::2])]
     starts -= 1
     ends = starts + lengths
-    img = np.zeros(shape[0]*shape[1], dtype=np.uint8)
+    img = np.zeros(shape[0] * shape[1], dtype=np.uint8)
     for lo, hi in zip(starts, ends):
         img[lo:hi] = 1
     return img.reshape(shape)
+
 
 # RLE 인코딩 함수
 def rle_encode(mask):
@@ -43,9 +45,11 @@ def rle_encode(mask):
     pixels = np.concatenate([[0], pixels, [0]])
     runs = np.where(pixels[1:] != pixels[:-1])[0] + 1
     runs[1::2] -= runs[::2]
-    return ' '.join(str(x) for x in runs)
+    return " ".join(str(x) for x in runs)
+
 
 # ## Custom Dataset
+
 
 class SatelliteDataset(Dataset):
     def __init__(self, data, transform=None, augmentation=None, infer=False):
@@ -61,10 +65,10 @@ class SatelliteDataset(Dataset):
         img_path = self.data.iloc[idx, 1]
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+
         if self.infer:
             if self.transform:
-                image = self.transform(image=image)['image']
+                image = self.transform(image=image)["image"]
             return image
 
         mask_rle = self.data.iloc[idx, 2]
@@ -72,12 +76,12 @@ class SatelliteDataset(Dataset):
 
         if self.transform:
             augmented = self.transform(image=image, mask=mask)
-            image = augmented['image']
-            mask = augmented['mask']
-        
+            image = augmented["image"]
+            mask = augmented["mask"]
+
         if self.augmentation:
             sample = self.augmentation(image=image, mask=mask)
-            image, mask = sample['image'], sample['mask']
+            image, mask = sample["image"], sample["mask"]
 
         return image, mask
 
@@ -90,7 +94,7 @@ transform_valid = A.Compose(
         A.Sharpen(alpha=(0.3, 0.5), lightness=(0.5, 1.0), always_apply=True),
         A.RandomContrast(limit=0.2, p=1.0),
         A.Normalize(),
-        ToTensorV2()
+        ToTensorV2(),
     ]
 )
 
@@ -106,95 +110,104 @@ transform = A.Compose(
         A.RandomBrightnessContrast(p=0.5),
         A.RandomCrop(height=224, width=224, p=0.5),
         A.Normalize(),
-        ToTensorV2()
+        ToTensorV2(),
     ]
 )
 
 
-augmentation = A.Compose([
-    A.HorizontalFlip(p=0.5),
-    A.VerticalFlip(p=0.5),
-    A.RandomRotate90(p=0.5),
-    A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
-    A.RandomBrightnessContrast(p=0.5),
-    A.RandomCrop(height=224, width=224, p=0.5),
-    A.Normalize(),
-    ToTensorV2()
-])
+augmentation = A.Compose(
+    [
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5),
+        A.RandomBrightnessContrast(p=0.5),
+        A.RandomCrop(height=224, width=224, p=0.5),
+        A.Normalize(),
+        ToTensorV2(),
+    ]
+)
 
-train_csv = pd.read_csv('./cropped_train_5by5.csv')
-train_df = train_csv[:int(len(train_csv)*0.95)]
-valid_df = train_csv[int(len(train_csv)*0.95):]
+train_csv = pd.read_csv("./cropped_train_5by5.csv")
+train_df = train_csv[: int(len(train_csv) * 0.95)]
+valid_df = train_csv[int(len(train_csv) * 0.95) :]
 
 train_dataset = SatelliteDataset(data=train_df, transform=transform, augmentation=None)
 train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=8)
 
-valid_dataset = SatelliteDataset(data=valid_df, transform=transform_valid, augmentation=None)
+valid_dataset = SatelliteDataset(
+    data=valid_df, transform=transform_valid, augmentation=None
+)
 valid_dataloader = DataLoader(valid_dataset, batch_size=1, shuffle=True, num_workers=4)
+
 
 ## init weights
 def weights_init_normal(m):
     classname = m.__class__.__name__
-    #print(classname)
-    if classname.find('Conv') != -1:
+    # print(classname)
+    if classname.find("Conv") != -1:
         init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('Linear') != -1:
+    elif classname.find("Linear") != -1:
         init.normal_(m.weight.data, 0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
+    elif classname.find("BatchNorm") != -1:
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_xavier(m):
     classname = m.__class__.__name__
-    #print(classname)
-    if classname.find('Conv') != -1:
+    # print(classname)
+    if classname.find("Conv") != -1:
         init.xavier_normal_(m.weight.data, gain=1)
-    elif classname.find('Linear') != -1:
+    elif classname.find("Linear") != -1:
         init.xavier_normal_(m.weight.data, gain=1)
-    elif classname.find('BatchNorm') != -1:
+    elif classname.find("BatchNorm") != -1:
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_kaiming(m):
     classname = m.__class__.__name__
-    #print(classname)
-    if classname.find('Conv') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-    elif classname.find('Linear') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-    elif classname.find('BatchNorm') != -1:
+    # print(classname)
+    if classname.find("Conv") != -1:
+        init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
+    elif classname.find("Linear") != -1:
+        init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
+    elif classname.find("BatchNorm") != -1:
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_orthogonal(m):
     classname = m.__class__.__name__
-    #print(classname)
-    if classname.find('Conv') != -1:
+    # print(classname)
+    if classname.find("Conv") != -1:
         init.orthogonal_(m.weight.data, gain=1)
-    elif classname.find('Linear') != -1:
+    elif classname.find("Linear") != -1:
         init.orthogonal_(m.weight.data, gain=1)
-    elif classname.find('BatchNorm') != -1:
+    elif classname.find("BatchNorm") != -1:
         init.normal_(m.weight.data, 1.0, 0.02)
         init.constant_(m.bias.data, 0.0)
 
-def init_weights(net, init_type='normal'):
-    #print('initialization method [%s]' % init_type)
-    if init_type == 'normal':
+
+def init_weights(net, init_type="normal"):
+    # print('initialization method [%s]' % init_type)
+    if init_type == "normal":
         net.apply(weights_init_normal)
-    elif init_type == 'xavier':
+    elif init_type == "xavier":
         net.apply(weights_init_xavier)
-    elif init_type == 'kaiming':
+    elif init_type == "kaiming":
         net.apply(weights_init_kaiming)
-    elif init_type == 'orthogonal':
+    elif init_type == "orthogonal":
         net.apply(weights_init_orthogonal)
     else:
-        raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
+        raise NotImplementedError(
+            "initialization method [%s] is not implemented" % init_type
+        )
 
 
 # ## Define Model
+
 
 class ResidualConv(nn.Module):
     def __init__(self, input_dim, output_dim, stride, padding):
@@ -216,7 +229,6 @@ class ResidualConv(nn.Module):
         )
 
     def forward(self, x):
-
         return self.conv_block(x) + self.conv_skip(x)
 
 
@@ -332,9 +344,8 @@ class AttentionBlock(nn.Module):
         out = self.conv_encoder(x1) + self.conv_decoder(x2)
         out = self.conv_attn(out)
         return out * x2
-    
 
-    
+
 class ResUnetPlusPlus(nn.Module):
     def __init__(self, channel, filters=[32, 64, 128, 256, 512]):
         super(ResUnetPlusPlus, self).__init__()
@@ -417,17 +428,17 @@ class ResUnetPlusPlus(nn.Module):
 # ## Model Train
 
 # model 초기화
-model = ResUnetPlusPlus().to(device)
+model = ResUnetPlusPlus(channel=3).to(device)
 
-best_loss = 10 ** 9
+best_loss = 10**9
 patience_limit = 4
 patience_check = 0
 
 # loss function과 optimizer 정의
 criterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-f = open("train_log.txt", 'w')
-PATH = './model/'
+f = open("train_log.txt", "w")
+PATH = "./model/"
 
 # training loop
 for epoch in range(50):  # 10 에폭 동안 학습합니다.
@@ -444,7 +455,7 @@ for epoch in range(50):  # 10 에폭 동안 학습합니다.
         optimizer.step()
 
         epoch_loss += loss.item()
-    
+
     ###valid
     model.eval()
     val_loss = 0
@@ -452,21 +463,31 @@ for epoch in range(50):  # 10 에폭 동안 학습합니다.
         images = images.float().to(device)
         masks = masks.float().to(device)
         outputs = model(images)
-        
+
         loss = criterion(outputs, masks.unsqueeze(1))
         val_loss += loss.item()
 
-    f = open('train_log.txt', 'a')
-    print(f'Epoch {epoch+1}, Loss: {epoch_loss/len(train_dataloader)}, Valid Loss: {val_loss/len(valid_dataloader)}')
-    log_data = 'Epoch ' + str(epoch+1) + ', Loss:' + str(epoch_loss/len(train_dataloader)) + ', Valid Loss: ' + str(val_loss/len(valid_dataloader)) + '\n'
+    f = open("train_log.txt", "a")
+    print(
+        f"Epoch {epoch+1}, Loss: {epoch_loss/len(train_dataloader)}, Valid Loss: {val_loss/len(valid_dataloader)}"
+    )
+    log_data = (
+        "Epoch "
+        + str(epoch + 1)
+        + ", Loss:"
+        + str(epoch_loss / len(train_dataloader))
+        + ", Valid Loss: "
+        + str(val_loss / len(valid_dataloader))
+        + "\n"
+    )
     f.write(log_data)
     f.close()
 
-    if (epoch+1)%5 == 0:
-        #epoch_list = str(epoch+1)
+    if (epoch + 1) % 5 == 0:
+        # epoch_list = str(epoch+1)
         torch.save(model, PATH + f"./epoch{epoch+1}_model_unet2p_v2.pt")
-        print('Model epoch saved!')
-    
+        print("Model epoch saved!")
+
     ### early stopping
     if val_loss > best_loss:
         patience_check += 1
@@ -475,17 +496,19 @@ for epoch in range(50):  # 10 에폭 동안 학습합니다.
     else:
         best_loss = val_loss
         patience_check = 0
-        torch.save(model, PATH + './best_model_unet2p_v2.pt')
-        print('Model saved!')
+        torch.save(model, PATH + "./best_model_unet2p_v2.pt")
+        print("Model saved!")
 
-PATH = './model/'
-torch.save(model.state_dict(), PATH + 'unet2p_v2_latest_epoch.pt')
+PATH = "./model/"
+torch.save(model.state_dict(), PATH + "unet2p_v2_latest_epoch.pt")
 
 
 # ## Inference
 
-test_csv = pd.read_csv('./test.csv')
-test_dataset = SatelliteDataset(data=test_csv, transform=transform_valid, augmentation=None, infer=True)
+test_csv = pd.read_csv("./test.csv")
+test_dataset = SatelliteDataset(
+    data=test_csv, transform=transform_valid, augmentation=None, infer=True
+)
 test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=16)
 
 
@@ -494,25 +517,23 @@ with torch.no_grad():
     result = []
     for images in tqdm(test_dataloader):
         images = images.float().to(device)
-        
+
         outputs = model(images)
         masks = torch.sigmoid(outputs).cpu().numpy()
         masks = np.squeeze(masks, axis=1)
-        masks = (masks > 0.35).astype(np.uint8) # Threshold = 0.35
-        
+        masks = (masks > 0.35).astype(np.uint8)  # Threshold = 0.35
+
         for i in range(len(images)):
             mask_rle = rle_encode(masks[i])
-            if mask_rle == '': # 예측된 건물 픽셀이 아예 없는 경우 -1
+            if mask_rle == "":  # 예측된 건물 픽셀이 아예 없는 경우 -1
                 result.append(-1)
             else:
                 result.append(mask_rle)
-                
-                
 
 
 # ## Submission
 
-submit = pd.read_csv('./sample_submission.csv')
-submit['mask_rle'] = result
+submit = pd.read_csv("./sample_submission.csv")
+submit["mask_rle"] = result
 
-submit.to_csv('./submit_cropped_unet2plus_2.csv', index=False)
+submit.to_csv("./submit_cropped_unet2plus_2.csv", index=False)
